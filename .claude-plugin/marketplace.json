@@ -1,5 +1,5 @@
 {
-  "name": "claude-plugins",
+  "name": "marnie-plugins",
   "owner": { "name": "hamymarnie" },
   "description": "A collection of plugins for Claude Code",
   "plugins": [
