@@ -1,6 +1,6 @@
 {
   "name": "pixel-buddy",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "Usage rings, a pixel-art Claude mascot above the prompt, and a prompt-cache timer + context meter by the model picker",
   "types": "./types/index.d.ts",
   "userConfig": {
