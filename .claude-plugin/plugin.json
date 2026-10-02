@@ -1,0 +1,15 @@
+{
+  "name": "pixel-buddy",
+  "version": "0.1.0",
+  "description": "Usage rings, a pixel-art Claude mascot above the prompt, and a prompt-cache timer + context meter by the model picker",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheTtl": {
+      "type": "string",
+      "title": "Prompt cache TTL",
+      "description": "How long the prompt cache lives after each request",
+      "default": "1h",
+      "options": ["5m", "1h"]
+    }
+  }
+}
