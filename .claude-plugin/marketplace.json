@@ -1,0 +1,12 @@
+{
+  "name": "claude-plugins",
+  "owner": { "name": "hamymarnie" },
+  "description": "A collection of plugins for Claude Code",
+  "plugins": [
+    {
+      "name": "pixel-buddy",
+      "source": "./plugins/pixel-buddy",
+      "description": "Usage rings, a pixel-art mascot, and a prompt-cache timer + context meter"
+    }
+  ]
+}
