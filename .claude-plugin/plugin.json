@@ -1,6 +1,6 @@
 {
   "name": "pixel-buddy",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Usage rings with dollar spend, a usage breakdown card, a pixel-art Claude mascot above the prompt, and a prompt-cache timer + context meter by the model picker",
   "types": "./types/index.d.ts",
   "userConfig": {

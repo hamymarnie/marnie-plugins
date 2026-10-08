@@ -275,14 +275,15 @@ async function noteTranscript($: EngineInterface, transcriptPath: string | undef
 }
 
 // Re-reads the transcripts that changed since the last scan, a slice per dispatch,
-// and writes the report once the last file is in.
-async function scan($: EngineInterface, specs: WindowSpec[]) {
-  if (isRunning) return
+// and writes the report once the last file is in. Resolves true when that write is
+// done or coming.
+async function scan($: EngineInterface, specs: WindowSpec[]): Promise<boolean> {
+  if (isRunning) return false
   isRunning = true
   let isHandedOff = false
   try {
     const dir = await resolveDir($)
-    if (!dir) return
+    if (!dir) return false
     const now = await $.clock.now()
     windows = specs
     const listed = await listFiles($, dir, Math.min(...specs.map(w => w.start)))
@@ -299,6 +300,7 @@ async function scan($: EngineInterface, specs: WindowSpec[]) {
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
       .map(l => l.path)
     isHandedOff = await scanSlice($)
+    return true
   } finally {
     if (!isHandedOff) isRunning = false
   }
@@ -336,14 +338,27 @@ async function scanSlice($: EngineInterface): Promise<boolean> {
       return true
     }
   }
-  const r = summarize(files, windows, await $.clock.now(), await hostName($))
+  const t = await $.clock.now()
+  const r = summarize(files, windows, t, await hostName($))
+  // Written together, so the band redraws once for the new report and its clock.
   await update($, report, () => r)
+  await update($, minute, () => t)
   return false
 }
 
 // Prices every transcript on the machine against the windows the limits name.
-async function rescan($: EngineInterface) {
-  await scan($, windowSpecs(await read($, limits), await $.clock.now()))
+async function rescan($: EngineInterface): Promise<boolean> {
+  return scan($, windowSpecs(await read($, limits), await $.clock.now()))
+}
+
+// The band's once-a-minute redraw: a rescan, which moves the clock when it writes the
+// report; when no scan runs, the clock alone.
+async function tickMinute($: EngineInterface) {
+  const isWriting = await rescan($).catch(() => false)
+  if (!isWriting) {
+    const t = await $.clock.now()
+    await update($, minute, () => t)
+  }
 }
 
 const kTokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`)
@@ -359,11 +374,8 @@ export const register: Register = (on, options) => {
     await update($, frame, () => t0)
     await update($, minute, () => t0)
 
-    // Keep "resets in" fresh, and tick the cache countdown while it is warm.
-    $.clock.every(60_000, async () => {
-      const t = await $.clock.now()
-      await update($, minute, () => t)
-    })
+    // Keep "resets in" and the prices fresh, and tick the cache countdown while it is
+    // warm (only the model picker's row reads that one, so the band is left alone).
     await update($, moodAt, () => t0)
     $.clock.every(1_000, async () => {
       const at = await read($, cacheAt)
@@ -374,7 +386,7 @@ export const register: Register = (on, options) => {
 
     // Price every transcript on the machine once the session is up, then keep it fresh.
     $.clock.after(1_500, () => void rescan($).catch(() => {}))
-    $.clock.every(SCAN_MS, () => void rescan($).catch(() => {}))
+    $.clock.every(SCAN_MS, () => void tickMinute($).catch(() => {}))
 
     return next(e)
   })
@@ -428,9 +440,12 @@ export const register: Register = (on, options) => {
     const t = await read($, minute)
     const stored = await read($, mood)
     const m: Mood = e.props.isWorking ? 'working' : stored === 'working' ? 'idle' : stored
-    const tFrame = Math.max(await read($, frame), t)
-    const since = m === stored ? await read($, moodAt) : 0
-    const { mood: shownMood } = sceneFor(m, Math.max(0, (tFrame - since) / 1000))
+    // Read so the hand-off timers redraw the band; the scene itself is placed by the
+    // clock, so a redraw (which reloads the drawing) picks the animation up mid-step.
+    await read($, frame)
+    const tNow = await $.clock.now()
+    const since = m === stored ? await read($, moodAt) : tNow
+    const { mood: shownMood, t: sceneT } = sceneFor(m, Math.max(0, (tNow - since) / 1000))
     const shown = [
       { kind: 'five_hour', label: '5h', icon: 'clock' as const },
       { kind: 'seven_day', label: '7d', icon: 'cal' as const },
@@ -481,17 +496,18 @@ export const register: Register = (on, options) => {
     const w = r?.[v.window]
     const winLim = rl.find(l => l.kind === v.window)
     const perPct = outlook(winLim, w, t)?.perPct
-    const rows = w ? (v.group === 'threads' ? w.threads : byProject(w.threads)).slice(0, 6) : []
+    // The band shows the top `maxRows` rows and scrolls the rest: the meters row and
+    // the card's fixed rows (about 16) come first, then two rows a thread.
+    const fits = Math.floor((e.props.maxRows - 16) / 2)
+    const rows = w ? (v.group === 'threads' ? w.threads : byProject(w.threads)).slice(0, Math.max(1, Math.min(6, fits))) : []
     const winLabel = v.window === 'five_hour' ? '5h' : '7d'
     const ago = r ? Math.max(0, Math.round((t - r.at) / 60_000)) : undefined
     const card = (
       <Box
         width={Math.max(30, Math.min(58, e.props.bodyColumns - 2))}
-        marginBottom={1}
+        marginTop={1}
         flexDirection="column"
-        gap={1}
         paddingX={2}
-        paddingY={1}
         borderStyle="round"
         borderColor="#3a3a3a"
         backgroundColor="#1c1c1c"
@@ -541,7 +557,7 @@ export const register: Register = (on, options) => {
           <Text bold>{w ? money(w.usd) : '–'}</Text>
         </Box>
         {rows.length ? (
-          <Box flexDirection="column" gap={1}>
+          <Box flexDirection="column">
             {rows.map(th => (
               <Box key={`pb-${th.id}`} flexDirection="column">
                 <Box flexDirection="row" justifyContent="space-between">
@@ -569,11 +585,12 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    // The card sits in the band's own flow above the meters (a placed Box would be
-    // clipped to the band), so the band grows to hold it while it shows.
+    // The card sits in the band's own flow below the meters (a placed Box would be
+    // clipped to the band), so the band grows to hold it while it shows. Below, not
+    // above: a band taller than its rows scrolls from the top, and a card above would
+    // push the icon out from under the pointer, ending the hover that shows it.
     return (
       <Box flexDirection="column" paddingX={1}>
-        {card}
         <Box flexDirection="row" alignItems="center" justifyContent="space-between">
           <Box flexDirection="row" alignItems="center" gap={3}>
             {shown.map(s => (
@@ -589,13 +606,14 @@ export const register: Register = (on, options) => {
             </Box>
           </Box>
           <Svg
-            source={sceneSvg(shownMood)}
+            source={sceneSvg(shownMood, sceneT)}
             isInteractive
             alt={`Claude is ${shownMood === 'done' ? 'celebrating' : shownMood === 'relax' ? 'relaxing' : shownMood}`}
             width={SCENE_WIDTH}
             height={SCENE_HEIGHT}
           />
         </Box>
+        {card}
       </Box>
     )
   })

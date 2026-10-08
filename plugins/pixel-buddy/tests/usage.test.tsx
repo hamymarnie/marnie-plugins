@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 import { sceneSvg } from '../hooks/scene'
 import { parseLines, summarize } from '../hooks/usage'
@@ -82,7 +82,8 @@ test('bills a subagent to its session and a forked copy only once', async () => 
   expect(r.yourTurn).toBe(1)
 })
 
-test('the info button pins the usage card open on desktop', async $ => {
+test('the info button pins the usage card open on desktop', async ($, on) => {
+  mock.clock(on, { now: NOW })
   const ui = await $.ui.mount({
     plugin: 'pixel-buddy',
     surface: 'desktop',
@@ -105,4 +106,14 @@ test('the mascot is one animated drawing per mood, so the band need not redraw t
   expect(idle.includes('@keyframes')).toBe(true)
   expect(idle.length).toBeLessThan(131_072)
   for (const mood of ['working', 'done', 'relax'] as const) expect(sceneSvg(mood).length).toBeLessThan(131_072)
+})
+
+test('a redrawn mascot picks its animation up where it was', async () => {
+  const fresh = sceneSvg('working')
+  const later = sceneSvg('working', 2.5)
+  expect(fresh.includes('{{')).toBe(false)
+  expect(later.includes('{{')).toBe(false)
+  // "bob .3s step-end infinite -.15s" starts 2.5s further on: -.15 - 2.5.
+  expect(fresh.includes('bob .3s step-end infinite -0.15s')).toBe(true)
+  expect(later.includes('bob .3s step-end infinite -2.65s')).toBe(true)
 })

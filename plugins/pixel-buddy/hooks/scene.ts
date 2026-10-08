@@ -223,6 +223,23 @@ function keyframesCss(name: string, track: Track): string {
   return `@keyframes ${name}{${steps.join('')}}`
 }
 
+// The shorthand with its delay (the second time in it) as a slot sceneSvg fills in.
+const DELAY_SLOT = /\{\{(-?[\d.]+)\}\}/g
+function withDelaySlot(anim: string): string {
+  let times = 0
+  let hasDelay = false
+  const parts = anim
+    .trim()
+    .split(/\s+/)
+    .map(p => {
+      if (!/^-?[\d.]+s$/.test(p) || ++times !== 2) return p
+      hasDelay = true
+      return `{{${parseFloat(p)}}}`
+    })
+  if (!hasDelay) parts.push('{{0}}')
+  return parts.join(' ')
+}
+
 class Frame {
   // Absent: the frame is drawn as CSS animations rather than posed at a time.
   readonly t: number | undefined
@@ -235,7 +252,7 @@ class Frame {
     let body = inner
     if (anim && this.t === undefined) {
       this.used.add(anim.trim().split(/\s+/)[0] ?? '')
-      body = `<g style="animation:${anim};transform-origin:${origin[0]}px ${origin[1]}px">${inner}</g>`
+      body = `<g style="animation:${withDelaySlot(anim)};transform-origin:${origin[0]}px ${origin[1]}px">${inner}</g>`
     } else if (anim) {
       const p = poseAt(anim, this.t ?? 0)
       if (p) {
@@ -634,12 +651,12 @@ function draw(mood: Mood, f: Frame): string {
 }
 
 const animated = new Map<Mood, string>()
-// `mood` animated by the browser from the moment it is shown; the same markup every
-// call, so a redraw of the band leaves it running.
-export function sceneSvg(mood: Mood): string {
+// `mood` animated by the browser, starting `t` seconds in: every delay is moved back
+// by `t`, so the drawing a redraw reloads carries on from where the last one was.
+export function sceneSvg(mood: Mood, t = 0): string {
   let svg = animated.get(mood)
   if (!svg) animated.set(mood, (svg = draw(mood, new Frame())))
-  return svg
+  return svg.replace(DELAY_SLOT, (_, d: string) => `${n2(parseFloat(d) - t)}s`)
 }
 
 // One still frame of `mood`, `t` seconds after it began.
