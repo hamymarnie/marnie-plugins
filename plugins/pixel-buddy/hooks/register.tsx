@@ -19,8 +19,6 @@ const view = atom({ plugin: 'pixel-buddy', key: 'view' } as const, { window: 'fi
 
 // The "task complete" party plays once, then Claude relaxes for a while before idling.
 const RELAX_MS = 4 * 60_000
-// The mascot is drawn as still frames at this interval (about 7 per second).
-const FRAME_MS = 150
 
 // Transcripts are re-priced this often; a finished turn or Refresh asks sooner.
 const SCAN_MS = 60_000
@@ -99,6 +97,17 @@ async function setMood($: EngineInterface, m: Mood) {
   const t = await $.clock.now()
   await update($, moodAt, () => t)
   await update($, mood, () => m)
+  await update($, frame, () => t)
+  // The browser animates each scene; the band redraws only when the scene changes.
+  if (m === 'done') {
+    $.clock.after(DONE_SECONDS * 1000 + 50, () => void tickFrame($).catch(() => {}))
+    $.clock.after(DONE_SECONDS * 1000 + RELAX_MS + 50, () => void tickFrame($).catch(() => {}))
+  }
+}
+
+async function tickFrame($: EngineInterface) {
+  const t = await $.clock.now()
+  await update($, frame, () => t)
 }
 
 // Which scene shows `elapsed` seconds into a mood: done hands off to relax, relax to idle.
@@ -347,6 +356,7 @@ export const register: Register = (on, options) => {
     await update($, ctx, () => u.context)
     await update($, limits, () => u.rateLimits)
     const t0 = await $.clock.now()
+    await update($, frame, () => t0)
     await update($, minute, () => t0)
 
     // Keep "resets in" fresh, and tick the cache countdown while it is warm.
@@ -355,10 +365,6 @@ export const register: Register = (on, options) => {
       await update($, minute, () => t)
     })
     await update($, moodAt, () => t0)
-    $.clock.every(FRAME_MS, async () => {
-      const t = await $.clock.now()
-      await update($, frame, () => t)
-    })
     $.clock.every(1_000, async () => {
       const at = await read($, cacheAt)
       if (at === null) return
@@ -386,7 +392,10 @@ export const register: Register = (on, options) => {
   // Each response refreshes the prompt cache and reports the live usage.
   on('session.measure', async ($, e, next) => {
     await update($, ctx, () => e.context)
-    if (e.rateLimits.length) await update($, limits, () => e.rateLimits)
+    // Only a changed reading is written: each write redraws the band.
+    if (e.rateLimits.length && JSON.stringify(e.rateLimits) !== JSON.stringify(await read($, limits))) {
+      await update($, limits, () => e.rateLimits)
+    }
     if (e.changed.includes('context')) {
       const t = await $.clock.now()
       await update($, cacheAt, () => t)
@@ -401,7 +410,8 @@ export const register: Register = (on, options) => {
   })
 
   // Task complete: the party plays once, then Claude relaxes, then idles. The hand-offs
-  // are worked out from the clock on each frame (see sceneFor), so no timer can be lost.
+  // are worked out from the clock (see sceneFor); timers redraw the band at each one,
+  // and the minute tick catches any a reload lost.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId) return next(e)
     await setMood($, e.isAborted || e.reason === 'error' ? 'idle' : 'done')
@@ -418,9 +428,9 @@ export const register: Register = (on, options) => {
     const t = await read($, minute)
     const stored = await read($, mood)
     const m: Mood = e.props.isWorking ? 'working' : stored === 'working' ? 'idle' : stored
-    const tFrame = await read($, frame)
+    const tFrame = Math.max(await read($, frame), t)
     const since = m === stored ? await read($, moodAt) : 0
-    const { mood: shownMood, t: sceneT } = sceneFor(m, Math.max(0, (tFrame - since) / 1000))
+    const { mood: shownMood } = sceneFor(m, Math.max(0, (tFrame - since) / 1000))
     const shown = [
       { kind: 'five_hour', label: '5h', icon: 'clock' as const },
       { kind: 'seven_day', label: '7d', icon: 'cal' as const },
@@ -579,7 +589,8 @@ export const register: Register = (on, options) => {
             </Box>
           </Box>
           <Svg
-            source={sceneSvg(shownMood, sceneT)}
+            source={sceneSvg(shownMood)}
+            isInteractive
             alt={`Claude is ${shownMood === 'done' ? 'celebrating' : shownMood === 'relax' ? 'relaxing' : shownMood}`}
             width={SCENE_WIDTH}
             height={SCENE_HEIGHT}

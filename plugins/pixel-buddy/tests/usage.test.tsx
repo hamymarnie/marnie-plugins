@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { sceneSvg } from '../hooks/scene'
 import { parseLines, summarize } from '../hooks/usage'
 import type { FileSummary } from '../hooks/usage'
 
@@ -96,4 +97,12 @@ test('the info button pins the usage card open on desktop', async $ => {
   await ui.press({ key: 'pb-close' })
   expect(await ui.find({ type: 'Button', key: 'pb-close' })).toBeUndefined()
   await ui.unmount()
+})
+
+test('the mascot is one animated drawing per mood, so the band need not redraw to move it', async () => {
+  const idle = sceneSvg('idle')
+  expect(sceneSvg('idle')).toBe(idle)
+  expect(idle.includes('@keyframes')).toBe(true)
+  expect(idle.length).toBeLessThan(131_072)
+  for (const mood of ['working', 'done', 'relax'] as const) expect(sceneSvg(mood).length).toBeLessThan(131_072)
 })

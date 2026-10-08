@@ -1,7 +1,8 @@
-// Pixel-art scenes for the mascot. Each call draws ONE still frame of a mood at
-// time `t` (seconds since the mood began): every pixel is a <rect> in a 100x18 grid
-// drawn at 3x, and the motion comes from keyframe tracks evaluated here, so a
-// redraw of the band can never restart the animation.
+// Pixel-art scenes for the mascot: every pixel is a <rect> in a 100x18 grid drawn at
+// 3x, and the motion comes from keyframe tracks. `sceneSvg` hands the tracks to the
+// browser as CSS animations, so the band need not redraw to animate (a redraw every
+// frame resets the hover and press of everything else drawn in it); `sceneFrameSvg`
+// evaluates them here into one still frame at time `t`.
 
 import type { Mood } from '../types'
 
@@ -201,16 +202,42 @@ function lastValue(track: Track, key: keyof Pose): number {
 
 const n2 = (v: number) => Math.round(v * 100) / 100
 
+// The tracks as CSS keyframes, each property interpolated as sampleProp does.
+function keyframesCss(name: string, track: Track): string {
+  const has = (k: keyof Pose) => track.some(([, p]) => p[k] !== undefined)
+  const moves = has('tx') || has('ty') || has('sx') || has('sy')
+  const stops = [...new Set([0, ...track.map(([at]) => at), 100])].sort((a, b) => a - b)
+  const linear: Timing = { kind: 'linear' }
+  const at = (k: keyof Pose, pct: number) =>
+    n2(pct >= 100 ? lastValue(track, k) : sampleProp(track, k, pct, linear))
+  const steps = stops.map(pct => {
+    const decl: string[] = []
+    if (moves) {
+      decl.push(
+        `transform:translate(${at('tx', pct)}px,${at('ty', pct)}px) scale(${at('sx', pct)},${at('sy', pct)})`,
+      )
+    }
+    if (has('o')) decl.push(`opacity:${at('o', pct)}`)
+    return `${pct}%{${decl.join(';')}}`
+  })
+  return `@keyframes ${name}{${steps.join('')}}`
+}
+
 class Frame {
-  readonly t: number
-  constructor(t: number) {
+  // Absent: the frame is drawn as CSS animations rather than posed at a time.
+  readonly t: number | undefined
+  readonly used = new Set<string>()
+  constructor(t?: number) {
     this.t = t
   }
   // A group posed by `anim` at this frame, placed at (x, y); `origin` is where it scales from.
   g(anim: string | null, inner: string, x = 0, y = 0, origin: [number, number] = [0, 0]): string {
     let body = inner
-    if (anim) {
-      const p = poseAt(anim, this.t)
+    if (anim && this.t === undefined) {
+      this.used.add(anim.trim().split(/\s+/)[0] ?? '')
+      body = `<g style="animation:${anim};transform-origin:${origin[0]}px ${origin[1]}px">${inner}</g>`
+    } else if (anim) {
+      const p = poseAt(anim, this.t ?? 0)
       if (p) {
         if (p.o <= 0.02) return ''
         const tf: string[] = []
@@ -227,8 +254,21 @@ class Frame {
   // Shows sub-scene i of n for its slice of a T-second cycle, building only the one on screen.
   cycle(scenes: (() => string)[], T: number): string {
     const n = scenes.length
+    if (this.t === undefined) {
+      return scenes.map((scene, i) => this.g(`vis${n} ${T}s step-end infinite ${n2(i * (T / n) - T)}s`, scene())).join('')
+    }
     const i = Math.floor((((this.t % T) + T) % T) / (T / n))
-    return scenes[i]()
+    return scenes[i]!()
+  }
+
+  // The @keyframes of every track this frame's groups name.
+  css(): string {
+    return [...this.used]
+      .map(name => {
+        const track = KF[name] ?? (name.startsWith('vis') ? visTrack(Number(name.slice(3))) : undefined)
+        return track ? keyframesCss(name, track) : ''
+      })
+      .join('')
   }
 }
 
@@ -583,14 +623,28 @@ function relax(f: Frame): string {
   return f.cycle([sunset, fishing, hammockScene, campfire, barbecue, drive], 48)
 }
 
-// One still frame of `mood`, `t` seconds after it began.
-export function sceneSvg(mood: Mood, t: number): string {
-  const f = new Frame(t)
+function draw(mood: Mood, f: Frame): string {
   const body = mood === 'working' ? working(f) : mood === 'done' ? done(f) : mood === 'relax' ? relax(f) : idle(f)
+  const field = dots(f)
+  const style = f.t === undefined ? `<style>${f.css()}</style>` : ''
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W * 3}" height="${H * 3}" shape-rendering="crispEdges">` +
-    `<rect x="-2" y="-2" width="${W + 4}" height="${H + 4}" fill="${BAND_BG}"/>${dots(f)}${body}</svg>`
+    `${style}<rect x="-2" y="-2" width="${W + 4}" height="${H + 4}" fill="${BAND_BG}"/>${field}${body}</svg>`
   )
+}
+
+const animated = new Map<Mood, string>()
+// `mood` animated by the browser from the moment it is shown; the same markup every
+// call, so a redraw of the band leaves it running.
+export function sceneSvg(mood: Mood): string {
+  let svg = animated.get(mood)
+  if (!svg) animated.set(mood, (svg = draw(mood, new Frame())))
+  return svg
+}
+
+// One still frame of `mood`, `t` seconds after it began.
+export function sceneFrameSvg(mood: Mood, t: number): string {
+  return draw(mood, new Frame(t))
 }
 
 export const SCENE_WIDTH = W * 3
