@@ -12,7 +12,10 @@ export type Thread = {
   firstAt: number
   lastAt: number
 }
-export type WindowReport = { start: number; usd: number; tokens: number; threads: Thread[] }
+// One model's spend inside a window, by its display name ("Opus 5.5").
+export type ModelSpend = { label: string; usd: number; tokens: number }
+// `models` is absent from a report an older version stored.
+export type WindowReport = { start: number; usd: number; tokens: number; threads: Thread[]; models?: ModelSpend[] }
 // What every transcript on this machine has cost, priced at API rates, per window.
 export type UsageReport = {
   at: number

@@ -4,7 +4,7 @@
 // gives what each rate-limit window has cost so far, and against the window's percent
 // how many dollars one percent is worth.
 
-import type { Thread, UsageReport, WindowReport } from '../types'
+import type { ModelSpend, Thread, UsageReport, WindowReport } from '../types'
 
 // Per million tokens: [input, output, cache read]. Cache writes are 1.25x input for
 // the 5-minute cache and 2x for the hour cache. Longest matching prefix wins.
@@ -66,9 +66,19 @@ function price(model: string, u: Usage): number {
 const tokensOf = (u: Usage) =>
   (u.input_tokens ?? 0) + (u.output_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0)
 
+// A model's display name from its id: "claude-opus-5-5" is "Opus 5.5", the older
+// "claude-3-5-sonnet-20241022" "Sonnet 3.5". Ids it cannot read pass through as written.
+export function modelLabel(model: string): string {
+  const id = model.toLowerCase().replace(/^(us\.|eu\.|global\.)?anthropic\./, '').replace(/[-@]\d{8}(-v\d+:\d+)?$/, '')
+  const m = /^claude-(?:(\d+(?:-\d)?)-)?([a-z]+)(?:-(\d+(?:-\d)?))?$/.exec(id)
+  if (!m || !(m[1] ?? m[3])) return model
+  const family = m[2]!.charAt(0).toUpperCase() + m[2]!.slice(1)
+  return `${family} ${(m[3] ?? m[1])!.replace('-', '.')}`
+}
+
 // One priced request. `id` dedupes the lines a streamed message writes, and the
 // copies a resumed or forked session carries over from its parent.
-type Entry = { id: string; at: number; usd: number; tok: number }
+type Entry = { id: string; at: number; usd: number; tok: number; model: string }
 
 export type FileSummary = {
   size: number
@@ -130,7 +140,8 @@ export function parseLine(line: string, f: FileSummary, seen: Set<string>) {
     const at = Date.parse(d.timestamp)
     if (!Number.isFinite(at)) return
     const u = d.message.usage as Usage
-    f.entries.push({ id, at, usd: price(String(d.message.model ?? ''), u), tok: tokensOf(u) })
+    const model = String(d.message.model ?? '')
+    f.entries.push({ id, at, usd: price(model, u), tok: tokensOf(u), model: modelLabel(model) })
     return
   }
   if (!f.isMain || line.length > 4000) return
@@ -173,6 +184,7 @@ export function summarize(
   const out: Partial<Record<WindowSpec['kind'], WindowReport>> = {}
   for (const w of specs) {
     const threads = new Map<string, Thread>()
+    const models = new Map<string, ModelSpend>()
     let usd = 0
     let tok = 0
     for (const [path, f] of files) {
@@ -180,6 +192,13 @@ export function summarize(
         if (e.at < w.start || owner.get(e.id) !== path) continue
         usd += e.usd
         tok += e.tok
+        // Placeholder turns ("<synthetic>") ran no model and cost nothing.
+        if (e.model && !e.model.startsWith('<')) {
+          const ms = models.get(e.model) ?? { label: e.model, usd: 0, tokens: 0 }
+          ms.usd += e.usd
+          ms.tokens += e.tok
+          models.set(e.model, ms)
+        }
         let t = threads.get(f.session)
         if (!t) {
           const m = meta(f.session)
@@ -192,7 +211,13 @@ export function summarize(
         t.lastAt = Math.max(t.lastAt, e.at)
       }
     }
-    out[w.kind] = { start: w.start, usd, tokens: tok, threads: [...threads.values()].sort((a, b) => b.usd - a.usd) }
+    out[w.kind] = {
+      start: w.start,
+      usd,
+      tokens: tok,
+      threads: [...threads.values()].sort((a, b) => b.usd - a.usd),
+      models: [...models.values()].sort((a, b) => b.usd - a.usd),
+    }
   }
 
   // Sessions with activity in the 5h window: working while the model holds the turn.

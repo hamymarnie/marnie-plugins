@@ -183,6 +183,27 @@ function barSvg(percent: number): string {
   )
 }
 
+// Each family's own color for its bar; an unknown model is drawn gray.
+const FAMILY_COLOR: Record<string, string> = {
+  Fable: '#9b6be0',
+  Mythos: '#c35ad1',
+  Opus: '#d97757',
+  Sonnet: '#5a8fe6',
+  Haiku: '#4cc35a',
+}
+const modelColor = (label: string) => FAMILY_COLOR[label.split(' ')[0] ?? ''] ?? GLYPH
+
+// A thinner bar than a limit's, filled to `percent` in `color`.
+function modelBarSvg(percent: number, color: string): string {
+  const p = Math.min(100, Math.max(0, percent))
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BAR_W} 5" width="${BAR_W}" height="5" preserveAspectRatio="none">` +
+    `<rect x="0" y="0" width="${BAR_W}" height="5" rx="2.5" fill="${TRACK}"/>` +
+    (p > 0 ? `<rect x="0" y="0" width="${Math.max(5, (p * BAR_W) / 100).toFixed(1)}" height="5" rx="2.5" fill="${color}"/>` : '') +
+    `</svg>`
+  )
+}
+
 function byProject(threads: Thread[]): Thread[] {
   const out = new Map<string, Thread>()
   for (const t of threads) {
@@ -504,6 +525,35 @@ export const register: Register = (on, options) => {
           </Box>
           <Svg source={barSvg(lim?.percentUsed ?? 0)} alt={`${title} used`} height={8} />
           <Text dimColor>{parts.length ? parts.join(' · ') : 'waiting for a reading'}</Text>
+          {kind === 'seven_day' ? modelBars(o?.perPct) : null}
+        </Box>
+      )
+    }
+
+    // The week split by model, each model used in it once: its dollars, and at the
+    // window's dollars per percent, about how much of the limit it took. A bar fills
+    // to that estimate, or to its share of the spend before there is a reading.
+    const weekModels = r?.seven_day?.models ?? []
+    const modelBars = (perPct: number | undefined) => {
+      const total = r?.seven_day?.usd ?? 0
+      if (!weekModels.length || total <= 0) return null
+      return (
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          {weekModels.map(ms => {
+            const est = perPct ? ms.usd / perPct : undefined
+            const fillPct = est ?? (ms.usd / total) * 100
+            return (
+              <Box key={`pb-model-${ms.label}`} flexDirection="column">
+                <Box flexDirection="row" justifyContent="space-between">
+                  <Text>{ms.label}</Text>
+                  <Text dimColor>
+                    {[money(ms.usd), est !== undefined ? `≈${est < 1 ? est.toFixed(1) : Math.round(est)}%` : `${Math.round((ms.usd / total) * 100)}% of spend`].join(' · ')}
+                  </Text>
+                </Box>
+                <Svg source={modelBarSvg(fillPct, modelColor(ms.label))} alt={`${ms.label} share of the 7d limit`} height={5} />
+              </Box>
+            )
+          })}
         </Box>
       )
     }
@@ -511,8 +561,8 @@ export const register: Register = (on, options) => {
     const winLim = rl.find(l => l.kind === v.window)
     const perPct = outlook(winLim, w, t)?.perPct
     // The band shows the top `maxRows` rows and scrolls the rest: the meters row and
-    // the card's fixed rows (about 16) come first, then two rows a thread.
-    const fits = Math.floor((e.props.maxRows - 16) / 2)
+    // the card's fixed rows (about 16) and two a model come first, then two a thread.
+    const fits = Math.floor((e.props.maxRows - 16 - (weekModels.length ? 1 + 2 * weekModels.length : 0)) / 2)
     const rows = w ? (v.group === 'threads' ? w.threads : byProject(w.threads)).slice(0, Math.max(1, Math.min(6, fits))) : []
     const winLabel = v.window === 'five_hour' ? '5h' : '7d'
     const ago = r ? Math.max(0, Math.round((t - r.at) / 60_000)) : undefined

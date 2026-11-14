@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { sceneSvg } from '../hooks/scene'
-import { parseLines, summarize } from '../hooks/usage'
+import { modelLabel, parseLines, summarize } from '../hooks/usage'
 import type { FileSummary } from '../hooks/usage'
 
 const HOUR = 3_600_000
@@ -93,6 +93,42 @@ test('prices Fable 5.2 and Mythos 5.2 at their own rates, fast mode at double', 
   ])
   const r = summarize(new Map([['a.jsonl', main]]), [{ kind: 'five_hour', start: NOW - 5 * HOUR }], NOW, '')
   expect(near(r.five_hour?.usd, one + one + 2 * one)).toBe(true)
+})
+
+test('splits a window by model, each model used in it once', async () => {
+  const usage = { input_tokens: 0, output_tokens: 1_000_000 }
+  const main = summaryOf('s1', true, NOW - HOUR, [
+    assistantLine('a1', NOW - HOUR, 'end_turn', usage, 'claude-fable-5-2'),
+    assistantLine('a2', NOW - 2 * HOUR, 'end_turn', usage, 'claude-fable-5-2'),
+    assistantLine('a3', NOW - HOUR, 'end_turn', usage, 'claude-opus-5-5'),
+    assistantLine('a4', NOW - 3 * 24 * HOUR, 'end_turn', usage, 'claude-haiku-5-5'),
+    assistantLine('a5', NOW - HOUR, 'end_turn', { input_tokens: 0, output_tokens: 0 }, '<synthetic>'),
+  ])
+  const r = summarize(
+    new Map([['a.jsonl', main]]),
+    [
+      { kind: 'five_hour', start: NOW - 5 * HOUR },
+      { kind: 'seven_day', start: NOW - 7 * 24 * HOUR },
+    ],
+    NOW,
+    '',
+  )
+  expect(r.seven_day?.models?.map(m => [m.label, m.usd])).toEqual([
+    ['Fable 5.2', 80],
+    ['Opus 5.5', 20],
+    ['Haiku 5.5', 0.5],
+  ])
+  // Haiku ran three days ago: it is in the week, not the five hours.
+  expect(r.five_hour?.models?.map(m => m.label)).toEqual(['Fable 5.2', 'Opus 5.5'])
+})
+
+test('names models by family and version', async () => {
+  expect(modelLabel('claude-opus-5-5')).toBe('Opus 5.5')
+  expect(modelLabel('claude-fable-5')).toBe('Fable 5')
+  expect(modelLabel('claude-3-5-sonnet-20241022')).toBe('Sonnet 3.5')
+  expect(modelLabel('us.anthropic.claude-haiku-4-5-20251001-v1:0')).toBe('Haiku 4.5')
+  expect(modelLabel('claude-opus-4-5@20251101')).toBe('Opus 4.5')
+  expect(modelLabel('some-other-model')).toBe('some-other-model')
 })
 
 test('the info button pins the usage card open on desktop', async ($, on) => {
