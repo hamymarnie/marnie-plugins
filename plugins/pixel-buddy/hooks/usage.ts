@@ -10,6 +10,8 @@ import type { Thread, UsageReport, WindowReport } from '../types'
 // the 5-minute cache and 2x for the hour cache. Longest matching prefix wins.
 const PRICES: [string, number, number, number][] = (
   [
+    ['claude-fable-5-2', 8, 40, 0.2],
+    ['claude-mythos-5-2', 8, 40, 0.2],
     ['claude-fable-5-1', 10, 50, 0.25],
     ['claude-fable-5', 10, 50, 1],
     ['claude-mythos', 10, 50, 1],

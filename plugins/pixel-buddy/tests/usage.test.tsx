@@ -82,6 +82,19 @@ test('bills a subagent to its session and a forked copy only once', async () => 
   expect(r.yourTurn).toBe(1)
 })
 
+test('prices Fable 5.2 and Mythos 5.2 at their own rates, fast mode at double', async () => {
+  // Fable / Mythos 5.2: $8 in, $40 out, $0.20 cache read.
+  const usage = { input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 1_000_000 }
+  const one = 8 + 4 + 0.2
+  const main = summaryOf('s1', true, NOW - HOUR, [
+    assistantLine('f1', NOW - HOUR, 'end_turn', usage, 'claude-fable-5-2'),
+    assistantLine('f2', NOW - HOUR, 'end_turn', usage, 'claude-mythos-5-2'),
+    assistantLine('f3', NOW - HOUR, 'end_turn', { ...usage, speed: 'fast' }, 'claude-fable-5-2'),
+  ])
+  const r = summarize(new Map([['a.jsonl', main]]), [{ kind: 'five_hour', start: NOW - 5 * HOUR }], NOW, '')
+  expect(near(r.five_hour?.usd, one + one + 2 * one)).toBe(true)
+})
+
 test('the info button pins the usage card open on desktop', async ($, on) => {
   mock.clock(on, { now: NOW })
   const ui = await $.ui.mount({
