@@ -6,9 +6,6 @@
 
 import type { Mood } from '../types'
 
-// The band's own color, painted behind the scene.
-export const BAND_BG = '#212121'
-
 const W = 100
 const H = 18
 
@@ -377,7 +374,9 @@ function backdrop(bands: [string, number][], x0 = 30): string {
   return out
 }
 
-// The dotted field that fades in from the left, as in the band's art.
+// The dotted field that fades in from the left: see-through gray, so it reads on a
+// light or dark band alike.
+const dot = (x: number, y: number, a: number) => `<rect x="${x}" y="${y}" width="1" height="1" fill="#808080" fill-opacity="${a}"/>`
 function dots(f: Frame): string {
   let out = ''
   for (let x = 0; x < W; x += 2) {
@@ -386,8 +385,8 @@ function dots(f: Frame): string {
       const p = Math.pow(x / W, 1.6) * 0.6
       if (r < p) {
         out += r < p * 0.12
-          ? f.g(`tw ${(2 + rnd(x + y * 7) * 3).toFixed(2)}s step-end infinite ${(-rnd(x * y + 1) * 4).toFixed(2)}s`, rect(x, y, 1, 1, '#555'))
-          : rect(x, y, 1, 1, r < p * 0.35 ? '#3c3c3c' : '#2c2c2c')
+          ? f.g(`tw ${(2 + rnd(x + y * 7) * 3).toFixed(2)}s step-end infinite ${(-rnd(x * y + 1) * 4).toFixed(2)}s`, dot(x, y, 0.6))
+          : dot(x, y, r < p * 0.35 ? 0.3 : 0.15)
       }
     }
   }
@@ -646,7 +645,7 @@ function draw(mood: Mood, f: Frame): string {
   const style = f.t === undefined ? `<style>${f.css()}</style>` : ''
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W * 3}" height="${H * 3}" shape-rendering="crispEdges">` +
-    `${style}<rect x="-2" y="-2" width="${W + 4}" height="${H + 4}" fill="${BAND_BG}"/>${field}${body}</svg>`
+    `${style}${field}${body}</svg>`
   )
 }
 

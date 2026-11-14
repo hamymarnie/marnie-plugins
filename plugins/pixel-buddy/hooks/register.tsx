@@ -29,7 +29,18 @@ const USAGE_SCOPE = 'pixel-buddy-usage'
 const GREEN = '#4cc35a'
 const AMBER = '#e5a33a'
 const RED = '#e5534b'
+// Unlit tracks and quiet glyphs: a see-through gray reads on a light or dark band.
+const TRACK = 'rgba(128,128,128,.3)'
+const GLYPH = '#8a8a8a'
 const levelColor = (p: number) => (p >= 90 ? RED : p >= 70 ? AMBER : GREEN)
+
+// A round "i" drawn as vectors, so it stays crisp at any scale.
+const INFO_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">` +
+  `<circle cx="8" cy="8" r="6.6" fill="none" stroke="${GLYPH}" stroke-width="1.4"/>` +
+  `<circle cx="8" cy="4.9" r="1" fill="${GLYPH}"/>` +
+  `<path d="M8 7.3v4.2" stroke="${GLYPH}" stroke-width="1.6" stroke-linecap="round"/>` +
+  `</svg>`
 
 function span(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60_000))
@@ -50,11 +61,11 @@ function ringSvg(percent: number, icon: 'clock' | 'cal'): string {
   const p = Math.min(100, Math.max(0, percent)) / 100
   const glyph =
     icon === 'clock'
-      ? '<circle cx="15" cy="15" r="5.5" fill="none" stroke="#a0a0a0" stroke-width="1.6"/><path d="M15 12v3.4h2.6" fill="none" stroke="#a0a0a0" stroke-width="1.6" stroke-linecap="round"/>'
-      : '<rect x="10" y="11" width="10" height="9" rx="1.5" fill="none" stroke="#a0a0a0" stroke-width="1.6"/><path d="M10 14h10M12.5 9.5v3M17.5 9.5v3" stroke="#a0a0a0" stroke-width="1.6" stroke-linecap="round"/>'
+      ? `<circle cx="15" cy="15" r="5.5" fill="none" stroke="${GLYPH}" stroke-width="1.6"/><path d="M15 12v3.4h2.6" fill="none" stroke="${GLYPH}" stroke-width="1.6" stroke-linecap="round"/>`
+      : `<rect x="10" y="11" width="10" height="9" rx="1.5" fill="none" stroke="${GLYPH}" stroke-width="1.6"/><path d="M10 14h10M12.5 9.5v3M17.5 9.5v3" stroke="${GLYPH}" stroke-width="1.6" stroke-linecap="round"/>`
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30">` +
-    `<circle cx="15" cy="15" r="12" fill="none" stroke="#3a3a3a" stroke-width="2.6"/>` +
+    `<circle cx="15" cy="15" r="12" fill="none" stroke="${TRACK}" stroke-width="2.6"/>` +
     (p > 0
       ? `<circle cx="15" cy="15" r="12" fill="none" stroke="${levelColor(percent)}" stroke-width="2.6" stroke-linecap="round" ` +
         `stroke-dasharray="${(C * p).toFixed(2)} ${C.toFixed(2)}" transform="rotate(-90 15 15)"/>`
@@ -88,7 +99,7 @@ function ctxBarSvg(percent: number): string {
   let px = ''
   const lit = Math.round(percent / 10)
   for (let i = 0; i < 10; i++) {
-    px += `<rect x="${i * 4}" y="0" width="3" height="8" fill="${i < lit ? levelColor(percent) : '#3a3a3a'}"/>`
+    px += `<rect x="${i * 4}" y="0" width="3" height="8" fill="${i < lit ? levelColor(percent) : TRACK}"/>`
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 39 8" width="39" height="8" shape-rendering="crispEdges">${px}</svg>`
 }
@@ -159,12 +170,15 @@ function outlook(lim: Limit | undefined, w: WindowReport | undefined, now: numbe
   }
 }
 
+// Wider than any card, and drawn at a fixed height: the bar shrinks to the card's
+// width and stretches (preserveAspectRatio none) rather than thinning.
+const BAR_W = 1200
 function barSvg(percent: number): string {
   const p = Math.min(100, Math.max(0, percent))
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 8" width="400" height="8">` +
-    `<rect x="0" y="0" width="400" height="8" rx="4" fill="#3a3a3a"/>` +
-    (p > 0 ? `<rect x="0" y="0" width="${Math.max(8, p * 4).toFixed(1)}" height="8" rx="4" fill="${levelColor(p)}"/>` : '') +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BAR_W} 8" width="${BAR_W}" height="8" preserveAspectRatio="none">` +
+    `<rect x="0" y="0" width="${BAR_W}" height="8" rx="4" fill="${TRACK}"/>` +
+    (p > 0 ? `<rect x="0" y="0" width="${Math.max(8, (p * BAR_W) / 100).toFixed(1)}" height="8" rx="4" fill="${levelColor(p)}"/>` : '') +
     `</svg>`
   )
 }
@@ -488,7 +502,7 @@ export const register: Register = (on, options) => {
             <Text bold>{title}</Text>
             <Text bold color={lim ? levelColor(lim.percentUsed) : undefined}>{pctText(lim)}</Text>
           </Box>
-          <Svg source={barSvg(lim?.percentUsed ?? 0)} alt={`${title} used`} />
+          <Svg source={barSvg(lim?.percentUsed ?? 0)} alt={`${title} used`} height={8} />
           <Text dimColor>{parts.length ? parts.join(' · ') : 'waiting for a reading'}</Text>
         </Box>
       )
@@ -504,13 +518,12 @@ export const register: Register = (on, options) => {
     const ago = r ? Math.max(0, Math.round((t - r.at) / 60_000)) : undefined
     const card = (
       <Box
-        width={Math.max(30, Math.min(58, e.props.bodyColumns - 2))}
+        width="100%"
         marginTop={1}
         flexDirection="column"
         paddingX={2}
         borderStyle="round"
-        borderColor="#3a3a3a"
-        backgroundColor="#1c1c1c"
+        borderColor={TRACK}
         // Shown while the icon or the card is hovered; a click on the icon pins it open.
         display={pinned ? 'flex' : 'none'}
         hover={pinned ? undefined : { scope: USAGE_SCOPE, display: 'flex' }}
@@ -561,7 +574,7 @@ export const register: Register = (on, options) => {
             {rows.map(th => (
               <Box key={`pb-${th.id}`} flexDirection="column">
                 <Box flexDirection="row" justifyContent="space-between">
-                  <Text>{clip(th.title.replace(/\s+/g, ' '), 44)}</Text>
+                  <Text>{clip(th.title.replace(/\s+/g, ' '), Math.max(24, e.props.bodyColumns - 20))}</Text>
                   <Text bold>{money(th.usd)}</Text>
                 </Box>
                 <Text dimColor>
@@ -601,8 +614,12 @@ export const register: Register = (on, options) => {
                 <Text dimColor>{caption(s.lim, s.label)}</Text>
               </Box>
             ))}
-            <Box flexDirection="row" alignItems="center" hover={{ scope: USAGE_SCOPE }}>
-              <Button key="pb-info" label="ⓘ" plain dimColor onPress={() => update($, isPinned, x => !x)} />
+            {/* The drawn icon, with a blank Button laid over it to take the click. */}
+            <Box key="pb-info-box" flexDirection="row" alignItems="center" position="relative" hover={{ scope: USAGE_SCOPE }}>
+              <Svg source={INFO_SVG} alt="Usage details" width={16} height={16} />
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Button key="pb-info" label={' '} plain onPress={() => update($, isPinned, x => !x)} />
+              </Box>
             </Box>
           </Box>
           <Svg
